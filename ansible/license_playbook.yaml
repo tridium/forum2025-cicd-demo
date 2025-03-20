@@ -1,0 +1,21 @@
+- name: Install License
+  hosts: runners
+  tasks:
+    - name: Copy certificate
+      ansible.builtin.copy:
+        src: Tridium.certificate
+        dest: /opt/Niagara/Niagara-4.15.0.122/security/certificates
+  
+#    - name: Copy License      
+#      unarchive:
+#        src: "{{ hostvars[inventory_hostname].host_id }}.zip"
+#        dest: /opt/Niagara/Niagara-4.15.0.122/security/licenses
+
+    - name: Download License
+      become: true
+      become_user: admin
+      ansible.builtin.shell: |
+        . /opt/Niagara/Niagara-4.15.0.122/bin/.niagara
+        nre portalApi:com.tridium.portal.util.LicenseDownload
+      args:
+        creates: /opt/Niagara/Niagara-4.15.0.122/security/licenses/Tridium.license

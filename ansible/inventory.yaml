@@ -1,0 +1,21 @@
+runners:
+  hosts:
+    VA51TESTEM:
+      ansible_host: 192.168.56.109
+      # host_id can be used if you don't have internet access and want to install the license locally
+      host_id: LNX-E5FB-9254-6709-92FC
+    6C1VF92:
+      https_proxy: http://proxy.honeywell.com:80
+      ansible_host: ip-98-17.va51.tridium.com
+    # G7SDG92:
+    #  https_proxy: http://proxy.honeywell.com:80
+    #   ansible_host: 172.31.98.21 
+    # DPTDG92:
+    #  https_proxy: http://proxy.honeywell.com:80
+    #   ansible_host: 172.31.98.144
+    # JMRDG92:
+    #  https_proxy: http://proxy.honeywell.com:80
+    #   ansible_host: 172.31.98.14
+    # 5BRDG92:
+    #  https_proxy: http://proxy.honeywell.com:80
+    #   ansible_host: 172.31.98.15

@@ -1,0 +1,65 @@
+# These tasks are used to install Niagara on your host. You will need to change the source URL
+# as well as the version.
+
+    - name: Set niagara version
+      set_fact: 
+        NIAGARA_VERSION: "4.15.0.122"
+
+    - name: "register status of /opt/Niagara/Niagara-{{ NIAGARA_VERSION }}"
+      stat:
+        path: "/opt/Niagara/Niagara-{{ NIAGARA_VERSION }}/bin/niagaradctl"
+      register: niagaradctl_path
+
+    # TODO check if service is running
+    - name: install Niagara
+      when: "not niagaradctl_path.stat.exists"
+      block:
+
+      - name: Download Niagara
+        environment:
+          https_proxy: "{{ https_proxy }}"
+        get_url:
+          url: "https://artifactory-na.honeywell.com:443/artifactory/tridium-release-candidates-maven-stable-local/com/tridium/niagara/image/Tridium_N4_Supervisor_Linux_x64/{{ NIAGARA_VERSION }}-RC/Tridium_N4_Supervisor_Linux_x64-{{ NIAGARA_VERSION }}-RC.zip"
+          url_username: "{{ artifactory_user }}"
+          url_password: "{{ artifactory_password }}"
+          force_basic_auth: true
+          dest: "/tmp/Tridium_N4_Supervisor_Linux_x64-{{ NIAGARA_VERSION }}-RC.zip"
+
+      - name: create installer folder
+        file:
+          path: /tmp/n4_install
+          state: directory
+
+      - name: open Niagara installer
+        unarchive:
+          remote_src: true
+          src: "/tmp/Tridium_N4_Supervisor_Linux_x64-{{ NIAGARA_VERSION }}-RC.zip"
+          dest: /tmp/n4_install
+
+      # This allows for a silent unattended install
+      - name: copy silent.properties
+        copy:
+          src: ./silent.properties
+          dest: /tmp/n4_install
+
+      - name: execute installer
+        shell: |
+          chmod +x install.sh && ./install.sh silent.properties
+        args:
+          chdir: /tmp/n4_install
+          creates: /opt/Niagara/Niagara-4.15.0.122
+
+      - name: Reboot to start Niagarad
+        reboot:
+          post_reboot_delay: 10
+          # Since the runners are Dell 3000s, lets give it plenty of time to reboot
+          reboot_timeout: 600
+
+      # unfortunately, the niagaradctl status returns 0 regardless of status so 
+      # we need to check the wording of the output
+      - name: Get niagarad service status
+        command: /opt/Niagara/Niagara-4.15.0.122/bin/niagaradctl status
+        register: niagarad_service_status
+        failed_when: "'Niagara Daemon is running' not in niagarad_service_status.stdout"
+
+

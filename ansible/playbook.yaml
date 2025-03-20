@@ -1,0 +1,46 @@
+- name: Runner Setup
+  hosts: runners
+  tasks:
+    - name: Install aptitude
+      apt:
+        name: aptitude
+        state: latest
+        update_cache: true
+
+    - name: Install required system packages
+      apt:
+        pkg:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - python3-pip
+          - virtualenv
+          - python3-setuptools
+          - unzip
+          - tofrodos
+          - rsync
+          - libglib2.0-dev
+
+        state: latest
+        update_cache: true
+
+    - name: Setup docker
+      include_tasks: docker.yaml
+
+    - name: Setup github runner
+      vars:
+        github_runner_name: "{{ inventory_hostname }}"
+        github_runner_labels:
+          - Linux
+          - self-hosted
+          - X64
+          - Niagara
+        github_runner_delete_existing: false
+      include_tasks: github-runner.yaml
+
+    - name: Setup Niagara
+      include_tasks: niagara.yaml
+
+    - name: Setup Powershell
+      include_tasks: powershell.yaml      

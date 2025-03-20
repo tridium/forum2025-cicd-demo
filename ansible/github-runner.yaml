@@ -1,0 +1,149 @@
+# This set of tasks is used to register a github runner
+# TODO user VAR (admin)
+# TODO group VAR (admin)
+
+- name: Install packages required for github runners
+  apt:
+    state: latest
+    dpkg_options: 'force-confnew,force-confdef'
+    autoclean: yes
+    autoremove: yes
+    update_cache: yes
+    cache_valid_time: 3600
+  vars:
+    packages:
+    - curl
+    - jq
+
+- name: create the github group
+  group:
+    name: github
+    state: present
+
+- name: create the github user
+  user:
+    name: github
+    group: github
+    shell: /bin/bash
+    state: present
+
+- name: Allow 'github' group to have passwordless sudo
+  lineinfile:
+    dest: /etc/sudoers
+    state: present
+    regexp: '^%github'
+    line: '%github ALL=(ALL) NOPASSWD: ALL'
+    validate: 'visudo -cf %s'
+
+# Fetch the returncode for systemctl status of the runner
+# rc = 0 - running
+# rc = 3 - stopped
+# rc = 4 - Unit actions.runner.{{ github_runner_organization }}.{{ github_runner_name }}.service could not be found.
+- name: Obtain github action runner status
+  command: systemctl status actions.runner.{{ github_runner_organization }}.{{ github_runner_name }}.service
+  register: _runner_status
+  failed_when: _runner_status.rc > 4
+
+- name: install and register the runner if not already existing
+  block:
+  - name: create /home/github/actions-runner
+    file:
+      path: /home/github/actions-runner
+      state: directory
+      owner: github
+      group: github
+      mode: 0755
+
+  - name: fetch github version with uri
+    uri:
+      url: https://github.com/actions/runner/releases/latest
+    register: github_runner_response
+
+  - name: parse the runner version
+    set_fact:
+      github_runner_version: "{{ github_runner_response.url | regex_search('[0-9]+.[0-9]+.[0-9]+') }}"
+
+  - name: download github actions runner
+    get_url:
+      url: https://github.com/actions/runner/releases/download/v{{ github_runner_version }}/actions-runner-linux-x64-{{ github_runner_version }}.tar.gz
+      owner: github
+      group: github
+      dest: /home/github/actions-runner/actions-runner-linux-x64-{{ github_runner_version }}.tar.gz
+      mode: 0755
+
+  - name: Unarchive the runner
+    unarchive:
+      src: /home/github/actions-runner/actions-runner-linux-x64-{{ github_runner_version }}.tar.gz
+      dest: /home/github/actions-runner
+      owner: github
+      group: github
+      mode: 0755
+      remote_src: yes
+
+  - name: check if equally named runner {{ github_runner_name }} exists on org and extract id
+    uri:
+      url: https://api.github.com/repos/{{ github_runner_organization }}/actions/runners
+      headers:
+        Accept: "application/vnd.github.v3+json"
+        Authorization: "Bearer {{ github_runner_pat }}"
+    register: github_runner_query
+
+  - name: Print out flatten dictionary
+    debug:
+      msg: "{{ lookup('ansible.utils.to_paths', github_runner_query.json.runners) }}"
+
+  - name: retrieve runner id for {{ github_runner_name }}
+    vars:
+      query: "[?name=='{{ github_runner_name }}'].id | [0]"
+      runners: "{{ github_runner_query.json.runners }}"
+    set_fact:
+      _github_runner_id: "{{ runners | json_query(query) }}"
+
+  - name: delete the runner {{ github_runner_name }} from the repo if it exists
+    uri:
+      url: https://api.github.com/repos/{{ github_runner_organization }}/actions/runners/{{ _github_runner_id }}
+      headers:
+        Accept: "application/vnd.github.v3+json"
+        Authorization: "Bearer {{ github_runner_pat }}"
+      method: DELETE
+      status_code:
+        - 204
+    when: _github_runner_id != "" and github_runner_delete_existing
+
+  - name: retrieve github runner registration token
+    uri:
+      url: https://api.github.com/repos/{{ github_runner_organization }}/actions/runners/registration-token
+      headers:
+        Accept: "application/vnd.github.v3+json"
+        Authorization: "Bearer {{ github_runner_pat }}"
+      method: POST
+      status_code:
+        - 201      
+    register: registration_token_response
+
+  - name: set the github_runner_registration_token
+    set_fact:
+      github_runner_registration_token: "{{ registration_token_response.json.token }}"
+
+  - name: dump github runner registration token response
+    debug:
+      var: github_runner_registration_token
+
+  - name: configure the runner  
+    shell: "sudo -E -u github ./config.sh --unattended --url https://github.com/{{ github_runner_organization }} --token {{ github_runner_registration_token }} --name {{ github_runner_name }} --labels {{ ','.join(github_runner_labels) }}"
+    args:
+      executable: /bin/bash
+      chdir: /home/github/actions-runner
+
+  - name: install the runner as a service
+    shell: "sudo ./svc.sh install"
+    args:
+      executable: /bin/bash
+      chdir: /home/github/actions-runner
+
+  - name: start the runner
+    shell: ./svc.sh start
+    args:
+      executable: /bin/bash
+      chdir: /home/github/actions-runner
+  when: _runner_status.rc == 4 and 'could not be found' in _runner_status.stderr

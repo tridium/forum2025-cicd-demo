@@ -1,0 +1,13 @@
+<certificate version="1.0" vendor="Tridium" generated="2003-07-16" expiration="never">
+ <publicKey algorthm="DSA">
+MIIBtzCCASwGByqGSM44BAEwggEfAoGBAP1/U4EddRIpUt9KnC7s5Of2EbdSPO9EAMMeP4C2USZ
+pRV1AIlH7WT2NWPq/xfW6MPbLm1Vs14E7gB00b/JmYLdrmVClpJ+f6AR7ECLCT7up1/63xhv4O1
+fnxqimFQ8E+4P208UewwI1VBNaFpEy9nXzrith1yrv8iIDGZ3RSAHHAhUAl2BQjxUjC8yykrmCo
+uuEC/BYHPUCgYEA9+GghdabPd7LvKtcNrhXuXmUr7v6OuqC+VdMCz0HgmdRWVeOutRZT+ZxBxCB
+gLRJFnEj6EwoFhO3zwkyjMim4TwWeotUfI0o4KOuHiuzpnWRbqN/C/ohNWLx+2J6ASQ7zKTxvqh
+RkImog9/hWuWfBpKLZl6Ae1UlZAFMO/7PSSoDgYQAAoGACo/ytO+Pq+JBhXSiC1VhdTc5f6MBId
+NbaBJ+Xr+y8BHPCHEWMqAhs2i3hSfck+lY++A7ilXWhQqyhry1wE3qWGPKLVGAoJltIzUCaD5cg
+aNnjjx7gNHtHI+afH+IeBQSzbiSXaP2sRk/Nm1avsdVjKXaysPWB6l5lZB097NTI7I=
+ </publicKey>
+ <signature>MC0CFQCWeuny190mtvpsHDo9UIJoLlEBPAIUVm/vjfqReAvrHUwoXIH//ik9dcE=</signature>
+</certificate>

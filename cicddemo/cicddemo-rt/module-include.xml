@@ -1,0 +1,4 @@
+<types>
+  <!--com.niagaraforum.cicddemo-->
+  <type class="com.niagaraforum.cicddemo.BCiCdDemo" name="CiCdDemo"/>
+</types>

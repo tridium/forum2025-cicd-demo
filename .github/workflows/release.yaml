@@ -1,0 +1,77 @@
+name: Release Module
+# Creates a "github" release of our module.
+
+on: workflow_dispatch
+
+permissions:
+  contents: write
+  actions: read
+  checks: write
+
+jobs:
+  release:
+    runs-on:
+      - Self-hosted
+      - Linux
+      - x64
+      - Niagara
+
+    env:
+      NIAGARA_INSTALL: ${{ vars.NIAGARA_INSTALL }}
+      MODULE_NAME: ${{ vars.MODULE_NAME }}
+      RT_MODULE_PART: ${{ vars.MODULE_NAME }}-rt
+      niagara_user_home: ${{ vars.NIAGARA_USER_HOME }}
+      RELEASE_CERT: ${{ vars.RELEASE_CERT }}
+
+    steps:
+    - name: Fail if branch is not main
+      # Let's make sure we are only doing releases from the main branch.
+      if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+      run: |
+        echo "This workflow should not be triggered with workflow_dispatch on a branch other than main"
+        exit 1
+          
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: |
+          8
+
+    - name: Compile module
+      # Even though we have compiled and checked on the merge in to main, we will build from scratch
+      run: |
+        . $NIAGARA_INSTALL/bin/.niagara
+        sed -i -e 's/dev-signing-profile/release-signing-profile/g' build.gradle.kts
+        ./gradlew --no-daemon -Pniagara_user_home=$niagara_user_home \
+        -Porg.gradle.java.installations.auto-detect=false \
+        -Porg.gradle.java.installations.auto-download=false \
+        -Porg.gradle.java.installations.paths=$JAVA_HOME \
+        :$RT_MODULE_PART:clean \
+        :$RT_MODULE_PART:jar        
+        MODULE_VERSION=$( grep "defaultModuleVersion(\"" build.gradle.kts | awk '{ print $2}' FS=\")
+        echo "MODULE_VERSION=$MODULE_VERSION" >> $GITHUB_ENV
+
+    - name: Verify module
+      # As a safety check, lets verify our module against what has been configured as our root CA.
+      run: |
+          keytool -list -keystore $JAVA_HOME/jre/lib/security/cacerts -storepass changeit -rfc -alias release-cert || EXIT_CODE=$?
+          if [ $EXIT_CODE ]; then
+            echo "installing dev cert"
+            keytool -importcert -keystore $JAVA_HOME/jre/lib/security/cacerts -storepass changeit -alias release-cert -noprompt <<< $RELEASE_CERT
+          fi
+          jarsigner -verify -strict -verbose:summary -certs ${{ vars.MODULE_NAME }}/${{ vars.MODULE_NAME }}-rt/build/libs/$RT_MODULE_PART.jar
+
+    - name: Generate release
+      # This generates a "github" release that contains the source used to build as well as the release jar. This could be tweaked to
+      # include documentation, etc.
+      uses: softprops/action-gh-release@v2
+      with: 
+        name: ${{ vars.MODULE_NAME }}-rt ${{ env.MODULE_VERSION }}
+        tag_name: ${{ env.MODULE_VERSION }}
+        files: ${{ vars.MODULE_NAME }}/${{ vars.MODULE_NAME }}-rt/build/libs/*.jar
+        fail_on_unmatched_files: true
+

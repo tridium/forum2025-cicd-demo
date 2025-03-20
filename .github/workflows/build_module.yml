@@ -1,0 +1,378 @@
+name: Build Module
+
+on: [workflow_dispatch]
+
+permissions:
+  contents: read
+  actions: read
+  checks: write
+
+jobs:
+  build:
+    runs-on:
+      - Self-hosted
+      - Linux
+      - x64
+      - Niagara
+
+    env:
+      NIAGARA_INSTALL: ${{ vars.NIAGARA_INSTALL }}
+      MODULE_NAME: ${{ vars.MODULE_NAME }}
+      RT_MODULE_PART: ${{ vars.MODULE_NAME }}-rt
+      niagara_user_home: ${{ vars.NIAGARA_USER_HOME }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: |
+          8
+       
+    - name: Compile module
+      run: |
+        . $NIAGARA_INSTALL/bin/.niagara
+        ./gradlew --no-daemon -Pniagara_user_home=$niagara_user_home \
+        -Porg.gradle.java.installations.auto-detect=false \
+        -Porg.gradle.java.installations.auto-download=false \
+        -Porg.gradle.java.installations.paths=$JAVA_HOME \
+        :$RT_MODULE_PART:clean \
+        :$RT_MODULE_PART:moduleTestJar
+
+    - name: Store build output
+      uses: actions/upload-artifact@v4
+      id: build-output-step
+      with:
+        name: build-output-${{ github.run_id }}
+        path: ${{ vars.MODULE_NAME }}/${{ vars.MODULE_NAME }}-rt/build
+        if-no-files-found: error
+        retention-days: 2
+
+    - name: Store modules
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ vars.MODULE_NAME }}-rt
+        path: ${{ vars.MODULE_NAME }}/${{ vars.MODULE_NAME }}-rt/build/libs
+        if-no-files-found: error
+        retention-days: 15
+  coverage:
+    runs-on:
+      - Self-hosted
+      - Linux
+      - x64
+      - Niagara
+
+    needs: build
+
+    env:
+      NIAGARA_INSTALL: ${{ vars.NIAGARA_INSTALL }}
+      MODULE_NAME: ${{ vars.MODULE_NAME }}
+      RT_MODULE_PART: ${{ vars.MODULE_NAME }}-rt
+      niagara_user_home: ${{ vars.NIAGARA_USER_HOME }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: |
+            8
+          
+      - name: Restore build output
+        uses: actions/download-artifact@v4
+        with:
+          name: build-output-${{ github.run_id }}
+          path: ${{ vars.MODULE_NAME }}/${{ vars.MODULE_NAME }}-rt/build
+
+      - name: Run code coverage tests
+        run: |
+          . $NIAGARA_INSTALL/bin/.niagara
+          jarsigner -verify $MODULE_NAME/$RT_MODULE_PART/build/libs/cicddemo-rt.jar
+          jarsigner -verify $MODULE_NAME/$RT_MODULE_PART/build/libs/cicddemo-rt-module-test.jar
+          ./gradlew --no-daemon -Pniagara_user_home=$niagara_user_home \
+          -Porg.gradle.java.installations.auto-detect=false \
+          -Porg.gradle.java.installations.auto-download=false \
+          -Porg.gradle.java.installations.paths=$JAVA_HOME \
+          :$RT_MODULE_PART:niagaraTest || true
+          ./gradlew --no-daemon -Pniagara_user_home=$niagara_user_home \
+          -Porg.gradle.java.installations.auto-detect=false \
+          -Porg.gradle.java.installations.auto-download=false \
+          -Porg.gradle.java.installations.paths=$JAVA_HOME \
+          :$RT_MODULE_PART:jacocoNiagaraTestReport
+          
+      - name: Generate code coverage report
+        id: jacoco_reporter
+        uses: PavanMudigonda/jacoco-reporter@v5.0
+        if: always()
+        with:
+          coverage_results_path: ${{ vars.MODULE_NAME }}/${{ vars.MODULE_NAME }}-rt/build/reports/jacoco/niagaraTest/jacocoNiagaraTestReport.xml
+          coverage_report_name: Coverage Report
+          coverage_report_title: "Module Code Coverage: ${{ vars.MODULE_NAME }}/${{ vars.MODULE_NAME }}-rt"
+          minimum_coverage: 80
+          fail_below_threshold: true
+
+      - name: Store code coverage report
+        uses: actions/upload-artifact@v4
+        id: artifact-upload-step
+        if: always()
+        with:
+          name: code-coverage-report
+          path: ${{ vars.MODULE_NAME }}/${{ vars.MODULE_NAME }}-rt/build/reports/jacoco/niagaraTest/html/
+          if-no-files-found: error
+          retention-days: 15 
+        
+  unit_tests:
+    runs-on:
+      - Self-hosted
+      - Linux
+      - x64
+      - Niagara
+
+    needs: build
+
+    env:
+      NIAGARA_INSTALL: ${{ vars.NIAGARA_INSTALL }}
+      MODULE_NAME: ${{ vars.MODULE_NAME }}
+      RT_MODULE_PART: ${{ vars.MODULE_NAME }}-rt
+      niagara_user_home: ${{ vars.NIAGARA_USER_HOME }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: |
+            8
+
+      - name: Restore build output
+        uses: actions/download-artifact@v4
+        with:
+          name: build-output-${{ github.run_id }}
+          path: ${{ vars.MODULE_NAME }}/${{ vars.MODULE_NAME }}-rt/build
+
+      - name: Run unit tests
+        run: |
+          . $NIAGARA_INSTALL/bin/.niagara
+          ./gradlew --no-daemon -Pniagara_user_home=$niagara_user_home \
+          -Porg.gradle.java.installations.auto-detect=false \
+          -Porg.gradle.java.installations.auto-download=false \
+          -Porg.gradle.java.installations.paths=$JAVA_HOME \
+          :$RT_MODULE_PART:clean \
+          :$RT_MODULE_PART:moduleTestJar
+          mkdir $GITHUB_WORKSPACE/reports
+          $NIAGARA_INSTALL/bin/test -@Dniagara_user_home=$niagara_user_home -generateJunitReport -output:$GITHUB_WORKSPACE/reports $MODULE_NAME || true
+          ls $GITHUB_WORKSPACE/reports
+  
+      - name: Generate unit test report
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Unit Test Report
+          path: ${{ github.workspace }}/reports/junitreports/*.xml
+          reporter: java-junit
+          fail-on-error: 'true'
+          
+      - name: Store unit test report
+        uses: actions/upload-artifact@v4
+        id: artifact-upload-step
+        if: always()
+        with:
+          name: unit-test-report
+          path: ${{ github.workspace }}/reports/
+          if-no-files-found: error
+          retention-days: 15
+
+  static_code_analysis:
+    runs-on:
+      - Self-hosted
+      - Linux
+      - x64
+      - Niagara
+
+    needs: build
+
+    env:
+      NIAGARA_INSTALL: ${{ vars.NIAGARA_INSTALL }}    
+      MODULE_NAME: ${{ vars.MODULE_NAME }}
+      RT_MODULE_PART: ${{ vars.MODULE_NAME }}-rt
+      niagara_user_home: ${{ vars.NIAGARA_USER_HOME }}
+      SPOTBUGS_VERSION: ${{ vars.SPOTBUGS_VERSION }}
+      
+    steps:
+    - name: Setup java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: |
+          21
+
+    - name: Restore build output
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output-${{ github.run_id }}
+        path: ${{ vars.MODULE_NAME }}/${{ vars.MODULE_NAME }}-rt/build
+        
+    - name: Restore spotbugs tool
+      id: cache-spotbugs-restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ./spotbugs-${{ vars.SPOTBUGS_VERSION }}
+        key: cache-spotbugs-${{ vars.SPOTBUGS_VERSION }}
+    
+    - name: Download spotbugs
+      run: |
+        if [ -f ./spotbugs-$SPOTBUGS_VERSION/spotbugs-$SPOTBUGS_VERSION/lib/spotbugs.jar ]; then exit 0; fi
+        wget -nv https://github.com/spotbugs/spotbugs/releases/download/$SPOTBUGS_VERSION/spotbugs-$SPOTBUGS_VERSION.zip
+        rm -r -f ./spotbugs-$SPOTBUGS_VERSION
+        mkdir -p ./spotbugs-$SPOTBUGS_VERSION
+        unzip -q spotbugs-$SPOTBUGS_VERSION.zip -d ./spotbugs-$SPOTBUGS_VERSION
+
+    - name: Save spotbugs tool
+      id: cache-spotbugs-save
+      if: steps.cache-spotbugs-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ./spotbugs-${{ vars.SPOTBUGS_VERSION }}
+        key: cache-spotbugs-${{ vars.SPOTBUGS_VERSION }}       
+
+    - name: Run spotbugs
+      run: |
+        . $NIAGARA_INSTALL/bin/.niagara
+        mkdir -p ./spotbugs-reports
+        EXIT_CODE=0
+        java -jar ./spotbugs-$SPOTBUGS_VERSION/spotbugs-$SPOTBUGS_VERSION/lib/spotbugs.jar \
+        -textui \
+        -onlyAnalyze "com.niagaraforum.cicddemo.*" \
+        -sourcepath $MODULENAME/$RT_MODULE_PART/src \
+        -xml:withMessages=./spotbugs-reports/spotbugs.xml \
+        -html=./spotbugs-reports/spotbugs.html \
+        -quiet \
+        -exitcode \
+        -auxclasspath $niagara_home/modules \
+        -auxclasspath $niagara_home/bin/ext \
+        $MODULE_NAME/$RT_MODULE_PART/build/libs/$RT_MODULE_PART.jar || EXIT_CODE=$?
+        results=$(sed -n '/Project/,/Project/p ; /BugInstance/,/BugInstance/p' ./spotbugs-reports/spotbugs.xml | sed ':a;N;$!ba;s/\n/%0A/g')
+        echo "::error::$results"
+        exit $EXIT_CODE
+
+    - name: Store spotbugs report
+      uses: actions/upload-artifact@v4
+      id: artifact-upload-step
+      if: always()
+      with:
+        name: static-code-analysis-report
+        path: ./spotbugs-reports/
+        if-no-files-found: error
+        retention-days: 15    
+
+  software_composition_analysis:
+    runs-on:
+      - Self-hosted
+      - Linux
+      - x64
+      - Niagara
+
+    needs: build
+
+    env:
+      NIAGARA_INSTALL: ${{ vars.NIAGARA_INSTALL }}    
+      MODULE_NAME: ${{ vars.MODULE_NAME }}
+      RT_MODULE_PART: ${{ vars.MODULE_NAME }}-rt
+      niagara_user_home: ${{ vars.NIAGARA_USER_HOME }}
+      OWASP_DEPCHECK_VERSION: ${{ vars.OWASP_DEPCHECK_VERSION }}
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+      JAVA_TOOL_OPTIONS: -Xms512m -Xmx1024m
+      
+    steps:
+    - name: Setup java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: |
+          8
+          21
+            
+    - name: Restore OWASP depcheck tool
+      id: cache-depcheck-restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ./dependency-check-${{ vars.OWASP_DEPCHECK_VERSION }}
+        key: cache-depcheck-${{ vars.OWASP_DEPCHECK_VERSION }}
+    
+    - name: Download OWASP depcheck tool
+      run: |
+        if [ -f ./dependency-check-$OWASP_DEPCHECK_VERSION/dependency-check/bin/dependency-check.sh ]; then exit 0; fi
+        wget -nv https://github.com/jeremylong/DependencyCheck/releases/download/v$OWASP_DEPCHECK_VERSION/dependency-check-$OWASP_DEPCHECK_VERSION-release.zip
+        rm -r -f ./dependency-check-$OWASP_DEPCHECK_VERSION
+        mkdir -p ./dependency-check-$OWASP_DEPCHECK_VERSION
+        unzip -q dependency-check-$OWASP_DEPCHECK_VERSION-release.zip -d ./dependency-check-$OWASP_DEPCHECK_VERSION
+
+    - name: Save OWASP depcheck tool
+      id: cache-depcheck-save
+      if: steps.cache-depcheck-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ./dependency-check-${{ vars.OWASP_DEPCHECK_VERSION }}
+        key: cache-depcheck-${{ vars.OWASP_DEPCHECK_VERSION }}       
+
+    - name: Restore nvd cache
+      id: cache-nvd-restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ./dependency-check-${{ vars.OWASP_DEPCHECK_VERSION }}/dependency-check/data
+        key: dependency-check-data
+
+    - name: Restore build output
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output-${{ github.run_id }}
+        path: ${{ vars.MODULE_NAME }}/${{ vars.MODULE_NAME }}-rt/build
+          
+    - name: Run dependency check
+      run: |
+        export PATH=./dependency-check-$OWASP_DEPCHECK_VERSION/dependency-check/bin:$PATH
+        rm -r -f ./dependency-check-reports
+        mkdir -p ./dependency-check-reports        
+        dependency-check.sh --nvdApiKey $NVD_API_KEY \
+        --project "$RT_MODULE_PART" \
+        --format HTML \
+        --format JUNIT \
+        --failOnCVSS 0 \
+        --out ./dependency-check-reports \
+        --scan $MODULE_NAME/$RT_MODULE_PART/build/libs/$RT_MODULE_PART.jar
+
+    - name: Generate vulnerability report
+      uses: dorny/test-reporter@v1
+      if: always()
+      with:
+        name: Dependency Issues
+        path: ./dependency-check-reports/*.xml
+        reporter: java-junit
+        fail-on-error: 'true'
+
+    - name: Save vulnerability report
+      uses: actions/upload-artifact@v4
+      id: artifact-upload-step
+      if: always()
+      with:
+        name: owasp-depcheck-report
+        path: ./dependency-check-reports/
+        if-no-files-found: error
+        retention-days: 15    
+        
+    - name: Save nvd cache
+      id: cache-nvd-save
+      uses: actions/cache/save@v4
+      if: always()
+      with:
+        path: ./dependency-check-${{ vars.OWASP_DEPCHECK_VERSION }}/dependency-check/data
+        key: dependency-check-data-${{ github.run_id }}
